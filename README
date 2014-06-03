@@ -1,9 +1,9 @@
 
 
 This archive contains the distribution Authen-SASL-Perl-NTLM,
-version 0.001:
+version 0.002:
 
-  NTLM authentication plugin for Authen::SASL::Perl
+  NTLM authentication plugin for Authen::SASL
 
 This software is copyright (c) 2014 by Steven Lee.
 

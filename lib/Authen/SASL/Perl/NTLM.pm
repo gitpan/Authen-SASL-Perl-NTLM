@@ -1,6 +1,7 @@
 package Authen::SASL::Perl::NTLM;
-# ABSTRACT: NTLM authentication plugin for Authen::SASL::Perl
-$Authen::SASL::Perl::NTLM::VERSION = '0.001';
+# ABSTRACT: NTLM authentication plugin for Authen::SASL
+$Authen::SASL::Perl::NTLM::VERSION = '0.002';
+use 5.006;
 use strict;
 use warnings;
 
@@ -9,14 +10,28 @@ use MIME::Base64 ();
 
 use parent qw(Authen::SASL::Perl);
 
-sub mechanism { return 'NTLM' }
+# do we need these?
+# sub _order { 1 }
+# sub _secflags { 0 };
 
+sub mechanism { 'NTLM' } ## no critic (RequireFinalReturn)
+
+#
+# Initialises the NTLM object and sets the domain, host, user, and password.
+#
 sub client_start {
     my ($self) = @_;
 
-    ## no critic (RegularExpressions)
-    my @user = split /\\/, $self->_call('user');
-    my ( $domain, $user ) = @user > 1 ? @user : ( undef, $user[0] );
+    $self->{need_step} = 1;
+    $self->{error}     = undef;
+    $self->{stage}     = 0;
+
+    my $user = $self->_call('user');
+
+    # Check for the domain in the username
+    my $domain;
+    ( $domain, $user ) = split m{ \\ }xms, $user
+      if index( $user, q{\\} ) > -1;
 
     $self->{ntlm} = Authen::NTLM->new(
         host     => $self->host,
@@ -28,20 +43,44 @@ sub client_start {
     return q{};
 }
 
+#
+# If C<$challenge> is undefined, it will return a NTLM type 1 request
+# message.
+# Otherwise, C<$challenge> is assumed to be a NTLM type 2 challenge from
+# which the NTLM type 3 response will be generated and returned.
+#
 sub client_step {
-    my ( $self, $string ) = @_;
-    #<<<
-    return
-        MIME::Base64::decode_base64(
-            $self->{ntlm}->challenge(
-                # $string must be undef for challenge()
-                # to generate a type 1 message
-                $string
-                  ? MIME::Base64::encode_base64($string)
-                  : undef
-            )
-        );
-    #>>>
+    my ( $self, $challenge ) = @_;
+
+    if ( defined $challenge ) {
+        # The challenge has been decoded but Authen::NTLM expects it encoded
+        $challenge = MIME::Base64::encode_base64($challenge);
+
+        # Empty challenge string needs to be undef if we want
+        # Authen::NTLM::challenge() to generate a type 1 message
+        $challenge = undef if $challenge eq q{};
+    }
+
+    my $stage = ++$self->{stage};
+    if ( $stage == 1 ) {
+        $self->set_error('Challenge must not be given for type 1 request')
+          if $challenge;
+    }
+    elsif ( $stage == 2 ) {
+        $self->set_success; # no more steps
+        $self->set_error('No challenge was given for type 2 request')
+          if !$challenge;
+    }
+    else {
+        $self->set_error('Invalid step');
+    }
+    return q{} if $self->error;
+
+    my $response = $self->{ntlm}->challenge($challenge);
+
+    # The caller expects the response to be unencoded but
+    # Authen::NTLM::challenge() has already encoded it
+    return MIME::Base64::decode_base64($response);
 }
 
 1;
@@ -52,11 +91,11 @@ __END__
 
 =head1 NAME
 
-Authen::SASL::Perl::NTLM - NTLM authentication plugin for Authen::SASL::Perl
+Authen::SASL::Perl::NTLM - NTLM authentication plugin for Authen::SASL
 
 =head1 VERSION
 
-version 0.001
+version 0.002
 
 =head1 SYNOPSIS
 
@@ -72,12 +111,25 @@ version 0.001
 
     $client = $sasl->client_new(...);
     $client->client_start;
-    $client->client_step;
+    $client->client_step('');
+    $client->client_step($challenge);
 
 =head1 DESCRIPTION
 
-This module is a plugin for the Authen::SASL framework that implements the
+This module is a plugin for the L<Authen::SASL> framework that implements the
 client procedures to do NTLM authentication.
+
+Most users will probably only need this module indirectly, when you use
+another module that depends on Authen::SASL with NTLM authentication.
+E.g. connecting to an MS Exchange Server using Email::Sender, which
+depends on Net::SMTP(S) which in turn depends on Authen::SASL.
+
+You may see this when you get the following error message:
+
+    No SASL mechanism found
+
+(Unfortunately, Authen::SASL currently doesn't tell you which SASL mechanism
+is missing.)
 
 =head1 CALLBACK
 
@@ -98,11 +150,15 @@ The user's password to be used for authentication.
 
 =back
 
-=for Pod::Coverage mechanism
-client_start
-client_step
-server_start
-server_step
+=head2 Server
+
+This module does not support server-side authentication.
+
+=head1 SEE ALSO
+
+L<Authen::SASL>, L<Authen::SASL::Perl>.
+
+=for Pod::Coverage mechanism client_start client_step
 
 =head1 AUTHOR
 

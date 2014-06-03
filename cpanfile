@@ -2,6 +2,7 @@ requires "Authen::NTLM" => "0";
 requires "Authen::SASL::Perl" => "0";
 requires "MIME::Base64" => "0";
 requires "parent" => "0";
+requires "perl" => "5.006";
 requires "strict" => "0";
 requires "warnings" => "0";
 
